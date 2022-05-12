@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division
 
+import collections
 import math
 import numbers
 import random
@@ -1822,7 +1823,7 @@ class GaussNoise(ImageOnlyTransform):
     def get_params_dependent_on_targets(self, params):
         image = params["image"]
         var = random.uniform(self.var_limit[0], self.var_limit[1])
-        sigma = var ** 0.5
+        sigma = var**0.5
 
         if self.per_channel:
             gauss = random_utils.normal(self.mean, sigma, image.shape)
@@ -2804,7 +2805,7 @@ class RingingOvershoot(ImageOnlyTransform):
             / (2 * np.pi * np.sqrt((x - (ksize - 1) / 2) ** 2 + (y - (ksize - 1) / 2) ** 2)),
             [ksize, ksize],
         )
-        kernel[(ksize - 1) // 2, (ksize - 1) // 2] = cutoff ** 2 / (4 * np.pi)
+        kernel[(ksize - 1) // 2, (ksize - 1) // 2] = cutoff**2 / (4 * np.pi)
 
         # Normalize kernel
         kernel = kernel.astype(np.float32) / np.sum(kernel)
@@ -2982,7 +2983,7 @@ class AdvancedBlur(ImageOnlyTransform):
         grid = np.stack(np.meshgrid(ax, ax), axis=-1)
 
         # Calculate rotated sigma matrix
-        d_matrix = np.array([[sigmaX ** 2, 0], [0, sigmaY ** 2]])
+        d_matrix = np.array([[sigmaX**2, 0], [0, sigmaY**2]])
         u_matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
         sigma_matrix = np.dot(u_matrix, np.dot(d_matrix, u_matrix.T))
 
@@ -3100,3 +3101,43 @@ class PixelDropout(DualTransform):
 
     def get_transform_init_args_names(self) -> Tuple[str, str, str, str]:
         return ("dropout_prob", "per_channel", "drop_value", "mask_drop_value")
+
+
+class HistoryMosaic(DualTransform):
+    """Modified version of a Mosaic augmentation that store previous images and creates mosaic from it.
+
+    Mosaic augmentation: https://arxiv.org/pdf/2009.07168.pdf
+    """
+
+    def __init__(self, always_apply: bool = False, p: float = 0.5):
+        super().__init__(always_apply=always_apply, p=p)
+
+        self.img_deque: collections.deque = collections.deque(maxlen=4)
+        self.bboxes_deque: collections.deque = collections.deque(maxlen=4)
+
+    @staticmethod
+    def _mosaic_samples(deque, sample):
+        deque.append(sample)
+        if len(deque) == 1:
+            topleft, topright, botleft, botright = deque[0], deque[0], deque[0], deque[0]
+        elif len(deque) == 2:
+            topleft, topright, botleft, botright = deque[0], deque[1], deque[1], deque[1]
+        elif len(deque) == 3:
+            topleft, topright, botleft, botright = deque[0], deque[1], deque[2], deque[2]
+        else:
+            topleft, topright, botleft, botright = deque[0], deque[1], deque[2], deque[3]
+        return topleft, topright, botleft, botright
+
+    def get_transform_init_args_names(self):
+        return ()
+
+    def get_transform_init_args(self):
+        return {}
+
+    def apply(self, img: np.ndarray, **params) -> np.ndarray:
+        tl, tr, bl, br = self._mosaic_samples(self.img_deque, img)
+        return F.mosaic_image(tl, tr, bl, br)
+
+    def apply_to_bboxes(self, bboxes: list, **params) -> list:
+        tl, tr, bl, br = self._mosaic_samples(self.bboxes_deque, bboxes)
+        return F.mosaic_bbox(tl, tr, bl, br)

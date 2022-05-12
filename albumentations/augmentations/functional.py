@@ -67,6 +67,8 @@ __all__ = [
     "median_blur",
     "move_tone_curve",
     "multiply",
+    "mosaic_bbox",
+    "mosaic_image",
     "non_rgb_warning",
     "noop",
     "normalize",
@@ -587,7 +589,7 @@ def move_tone_curve(img, low_y, high_y):
 
     # Defines responze of a four-point bezier curve
     def evaluate_bez(t):
-        return 3 * (1 - t) ** 2 * t * low_y + 3 * (1 - t) * t ** 2 * high_y + t ** 3
+        return 3 * (1 - t) ** 2 * t * low_y + 3 * (1 - t) * t**2 * high_y + t**3
 
     evaluate_bez = np.vectorize(evaluate_bez)
     remapping = np.rint(evaluate_bez(t) * 255).astype(np.uint8)
@@ -1930,3 +1932,76 @@ def pixel_dropout(image: np.ndarray, drop_mask: np.ndarray, drop_value: Union[fl
     else:
         drop_values = np.full_like(image, drop_value)  # type: ignore
     return np.where(drop_mask, drop_values, image)
+
+
+def mosaic_image(
+    top_left: np.ndarray, top_right: np.ndarray, bottom_left: np.ndarray, bottom_right: np.ndarray
+) -> np.ndarray:
+    """Combine images into mosaic.
+    Mosaic augmentation looks like this:
+
+    ```
+       top_left | top_right
+    ------------.--------------
+    bottom_left | bottom_right
+    ```
+
+    Args:
+        top_left: top left image
+        top_right: top right image
+        bottom_left: bottom left image
+        bottom_right: bottom right image
+
+    Returns:
+        Combined image.
+    """
+    original_h = top_left.shape[0]
+    original_w = top_left.shape[1]
+    combined = np.empty((original_h * 2, original_w * 2, 3), dtype=np.uint8)
+    for idx, img in enumerate([top_left, top_right, bottom_left, bottom_right]):
+        ix, iy = idx // 2, idx % 2
+        # make the same size as tile
+        if img.shape != (original_h, original_w, 3):
+            img = cv2.resize(img, (original_w, original_h))
+        # fmt: off
+        combined[ix * original_h:(ix + 1) * original_h, iy * original_w:(iy + 1) * original_w, :] = img
+        # fmt: on
+    return combined
+
+
+def mosaic_bbox(top_left, top_right, bottom_left, bottom_right):
+    """Combine bounding boxes into mosaic.
+    Mosaic augmentation looks like this:
+
+    ```
+       top_left | top_right
+    ------------.--------------
+    bottom_left | bottom_right
+    ```
+
+    Args:
+        top_left: list of bounding boxes in a format `(x_min, y_min, x_max, y_max)`.
+        top_right: list of bounding boxes in a format `(x_min, y_min, x_max, y_max)`.
+        bottom_left: list of bounding boxes in a format `(x_min, y_min, x_max, y_max)`.
+        bottom_right: list of bounding boxes in a format `(x_min, y_min, x_max, y_max)`.
+
+    Returns:
+        Combined bounding boxes (list of bounding boxes in a format `(x_min, y_min, x_max, y_max)`).
+    """
+    combined = []
+    # NOTE: order of bboxes is not the same as in `image_mosaic`
+    #       because coordinate system start (aka 'zero point')
+    #       is on top left corner, that's why need to switch
+    #       places for a `top_right` and `bottom_left` objects.
+    for idx, bboxes in enumerate([top_left, bottom_left, top_right, bottom_right]):
+        ix, iy = idx // 2, idx % 2
+        # tile bounding boxes
+        for x1, y1, x2, y2, lbl in bboxes:
+            # fmt: off
+            combined.append((
+                x1 / 2 + 0.5 * ix, y1 / 2 + 0.5 * iy,
+                x2 / 2 + 0.5 * ix, y2 / 2 + 0.5 * iy,
+                lbl,
+            ))
+            # fmt: on
+    return combined

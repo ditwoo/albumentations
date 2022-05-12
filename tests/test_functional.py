@@ -773,8 +773,8 @@ def test_solarize(dtype):
     max_value = F.MAX_VALUES_BY_DTYPE[dtype]
 
     if dtype == np.dtype("float32"):
-        img = np.arange(2 ** 10, dtype=np.float32) / (2 ** 10)
-        img = img.reshape([2 ** 5, 2 ** 5])
+        img = np.arange(2**10, dtype=np.float32) / (2**10)
+        img = img.reshape([2**5, 2**5])
     else:
         max_count = 1024
         count = min(max_value + 1, 1024)
@@ -958,3 +958,37 @@ def test_cv_dtype_from_np():
     assert F.get_opencv_dtype_from_numpy(np.dtype("float32")) == cv2.CV_32F
     assert F.get_opencv_dtype_from_numpy(np.dtype("float64")) == cv2.CV_64F
     assert F.get_opencv_dtype_from_numpy(np.dtype("int32")) == cv2.CV_32S
+
+
+def test_mosaic_image():
+    def image_with_text(text, size=(512, 512)):
+        """Generate image with text on it.
+
+        Args:
+            text (str): text to put on image.
+            size (Tuple[int, int]): image sizes (height, width).
+
+        Returns:
+            image (np.ndarray with shape [height, width, 3]).
+        """
+        h, w = int(size[0]), int(size[1])
+        img = np.full((h, w, 3), 255.0, dtype=np.uint8)
+        p = int(h // 2), int(w // 2)
+        img = cv2.putText(img, str(text), p, cv2.FONT_HERSHEY_SIMPLEX, 4, (0, 0, 0), 2, cv2.LINE_AA)
+        return img
+
+    one, two = image_with_text("1"), image_with_text("2")
+    three, four = image_with_text("3"), image_with_text("4")
+
+    actual = F.mosaic_image(one, two, three, four)
+
+    # expected image structure:
+    #
+    #       1122
+    #       1122
+    #       3344
+    #       3344
+    #
+    expected = np.concatenate((np.concatenate((one, two), axis=1), np.concatenate((three, four), axis=1)), axis=0)
+
+    assert np.array_equal(actual, expected)
